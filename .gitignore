@@ -1,0 +1,7 @@
+.env
+sessions.json
+sessions.json.tmp
+ax.fp
+__pycache__/
+*.pyc
+.venv/

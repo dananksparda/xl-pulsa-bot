@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: xl-pulsa-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn bot:app --bind 0.0.0.0:$PORT --workers 1 --threads 4
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: BASE_API_URL
+        sync: false
+      - key: BASE_CIAM_URL
+        sync: false
+      - key: BASIC_AUTH
+        sync: false
+      - key: UA
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: AES_KEY_ASCII
+        sync: false
+      - key: AX_FP_KEY
+        sync: false
+      - key: XDATA_KEY
+        sync: false
+      - key: AX_API_SIG_KEY
+        sync: false
+      - key: ENCRYPTED_FIELD_KEY
+        sync: false
