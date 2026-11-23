@@ -1,4 +1,5 @@
-"""Bot Telegram cek pulsa & kuota XL (myXL) — webhook, siap deploy di Render free tier.
+"""Bot Telegram cek pulsa & kuota XL (myXL) — webhook, siap deploy di
+Hugging Face Spaces (Docker) atau Render free tier.
 
 Sumber API XL: https://github.com/purplemashu/me-cli-sunset
 Modul klien XL di folder xlclient/ adalah salinan minimal dari repo tersebut
@@ -12,10 +13,11 @@ Cara kerja:
 - /paket        -> detail semua paket/kuota aktif
 - /logout       -> hapus sesi
 
-Token disimpan di sessions.json. PERHATIAN: filesystem Render free tier itu
+Token disimpan di sessions.json. PERHATIAN: filesystem hosting gratis itu
 ephemeral — tiap restart/deploy, file ini hilang dan pengguna harus /login lagi.
-Itu trade-off hosting gratis; kalau mau sesi awet, pakai Render Disk (berbayar)
-atau simpan token di database eksternal.
+Itu trade-off hosting gratis; solusinya: simpan XL_REFRESH_TOKEN (dan
+XL_NUMBER / XL_SUBSCRIBER_ID) sebagai environment variable / Secret, lalu
+bot memulihkan sesi dari sana (lihat /token).
 """
 
 import html
@@ -43,7 +45,7 @@ _lock = threading.Lock()
 _pending_otp = {}  # chat_id -> {"number": str, "subscriber_id": str}
 
 # Sesi cadangan dari environment variable — supaya bot tetap bisa /cek tanpa
-# OTP setelah Render restart (sessions.json di free tier ikut terhapus).
+# OTP setelah hosting restart (sessions.json di free tier ikut terhapus).
 # Isi sekali setelah login pertama (lihat perintah /token):
 #   XL_NUMBER=628xxxxxxxxxx  XL_REFRESH_TOKEN=...  XL_SUBSCRIBER_ID=... (opsional)
 ENV_NUMBER = os.getenv("XL_NUMBER", "").strip()
@@ -131,7 +133,7 @@ def get_session(chat_id):
         sessions = load_sessions()
         session = sessions.get(str(chat_id))
     if not session and ENV_NUMBER and ENV_REFRESH_TOKEN:
-        # Tidak ada sesi tersimpan (mis. Render baru restart): pulihkan dari env.
+        # Tidak ada sesi tersimpan (mis. hosting baru restart): pulihkan dari env.
         print("[sesi] memulihkan sesi dari XL_REFRESH_TOKEN (env)")
         session = {
             "number": int(ENV_NUMBER),
@@ -194,7 +196,7 @@ HELP = (
     "/otp 123456 — masukkan kode OTP dari SMS\n"
     "/cek — lihat pulsa, masa aktif & kuota\n"
     "/paket — detail semua paket aktif\n"
-    "/token — tampilkan refresh token (untuk disimpan di Render)\n"
+    "/token — tampilkan refresh token (untuk disimpan sebagai Secret)\n"
     "/logout — hapus sesi login\n\n"
     "OTP hanya perlu sekali saat login pertama. Setelah itu /cek pakai token\n"
     "yang tersimpan — tanpa OTP lagi, sampai tokennya mati."
@@ -322,11 +324,12 @@ def handle_message(chat_id, text):
             chat_id,
             "🔑 <b>Refresh token</b> untuk nomor "
             f"{html.escape(str(session['number']))}:\n\n<code>{html.escape(rt)}</code>\n\n"
-            "Salin ini ke Environment Variables di Render sebagai "
+            "Salin ini ke Secrets di Hugging Face Space (Settings → Variables and "
+            "secrets) sebagai "
             "<b>XL_REFRESH_TOKEN</b>, plus:\n"
             f"XL_NUMBER=<code>{html.escape(str(session['number']))}</code>\n"
             f"XL_SUBSCRIBER_ID=<code>{html.escape(str(session.get('subscriber_id', '')))}</code>\n\n"
-            "Supaya bot tetap bisa /cek tanpa OTP walau Render restart.\n\n"
+            "Supaya bot tetap bisa /cek tanpa OTP walau Space restart.\n\n"
             "⚠️ Token ini sama kuatnya dengan password — jangan dibagikan ke siapa pun, "
             "dan hapus pesan ini setelah disalin.",
         )
@@ -349,6 +352,26 @@ def handle_message(chat_id, text):
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "bot": "xl-pulsa-bot"})
+
+
+@app.route("/setwebhook", methods=["GET"])
+def setwebhook_route():
+    """Pasang webhook ke Telegram. Dipakai saat bot jalan di bawah server
+    (gunicorn / Hugging Face Spaces), karena blok __main__ tidak jalan di sana.
+    Butuh WEBHOOK_URL di environment, mis. https://user-xl-pulsa-bot.hf.space"""
+    base = os.getenv("WEBHOOK_URL") or os.getenv("RENDER_EXTERNAL_URL", "")
+    if not BOT_TOKEN or not base:
+        return jsonify({"ok": False, "error": "BOT_TOKEN / WEBHOOK_URL belum diset"}), 400
+    url = base.rstrip("/") + "/webhook"
+    try:
+        r = requests.post(
+            f"{TELEGRAM_API}/setWebhook",
+            json={"url": url, "allowed_updates": ["message"]},
+            timeout=20,
+        )
+        return jsonify({"ok": r.status_code == 200, "url": url, "telegram": r.text[:300]})
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/webhook", methods=["POST"])
